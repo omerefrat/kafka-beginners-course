@@ -17,7 +17,7 @@ public class BasicTwitterReader {
                 System.out.println("@" + status.getUser().getScreenName() + ":" + status.getText());
             }
         } catch (TwitterException e){
-            logger.error("Error executing Twitter query: ",e.getErrorMessage());
+            logger.error("Error executing Twitter query:",e.getErrorMessage());
         }
 
 
