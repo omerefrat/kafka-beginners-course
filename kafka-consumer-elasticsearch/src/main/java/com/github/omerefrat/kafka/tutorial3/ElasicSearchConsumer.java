@@ -11,8 +11,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
@@ -26,9 +27,9 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
-public class ElasicSeachConsumer {
+public class ElasicSearchConsumer {
 
-    static Logger logger = LoggerFactory.getLogger(ElasicSeachConsumer.class.getName());
+    static Logger logger = LoggerFactory.getLogger(ElasicSearchConsumer.class.getName());
 
 
     public static RestHighLevelClient createClient() {
@@ -55,7 +56,7 @@ public class ElasicSeachConsumer {
 
     private static KafkaConsumer<String,String>  getKafkaConsumer(){
         String bootstrapServers = "127.0.0.1:9092";
-        String groupId = "my-fifth-application";
+        String groupId = "kafka-demo-elasticsearch";
         String topic = "twitter-tweets";
 
         // create Consumer configs
@@ -65,7 +66,7 @@ public class ElasicSeachConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG,groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"earliest");
-        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"10");
+        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"100");
         properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,"false"); // disable auto commit of offsets
 
         // create the Consumer
@@ -85,7 +86,7 @@ public class ElasicSeachConsumer {
         KafkaConsumer<String,String> kafkaConsumer = getKafkaConsumer();
 
         // pulling the data from kafka
-        int numberOfMessagesToRead = 500;
+        int numberOfMessagesToRead = 5000;
         boolean keepOnReading = true;
         int numberOfMessagesReadSoFar = 0;
 
@@ -94,35 +95,31 @@ public class ElasicSeachConsumer {
 
             logger.info("reading tweets from kafka...");
             ConsumerRecords<String,String> records =  kafkaConsumer.poll(Duration.ofMillis(100));
-
             logger.info(records.count() + " new tweets received");
+
+            BulkRequest bulkRequest = new BulkRequest();
+
             for (ConsumerRecord<String,String> record :records){
                 numberOfMessagesReadSoFar++;
                 String jsonString = record.value();
 
                 if (!jsonString.isEmpty()){
 
-                    // kafka generic id
-                    //String id = record.topic() + "_" + record.partition()  + "_" +  record.offset();
-
                     // twitter id
                     String id = getTweetId(jsonString);
 
-                    logger.info("start saving tweet text: " + jsonString);
+                    if (id.isEmpty()) {
+                        // create kafka generic id
+                        id = record.topic() + "_" + record.partition() + "_" + record.offset();
+                    }
+
                     IndexRequest indexRequest = new IndexRequest(
                             "twitter",
                             "tweets",
                             id)
                             .source(jsonString, XContentType.JSON);
 
-                    IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
-                    logger.info(indexResponse.getId());
-
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
+                    bulkRequest.add(indexRequest);
                 }
 
                 if (numberOfMessagesReadSoFar == numberOfMessagesToRead){
@@ -132,6 +129,11 @@ public class ElasicSeachConsumer {
             }
 
             if (records.count() > 0) {
+
+                // save to ES
+                logger.info("saving bulk tweets to Elastic Search...");
+                BulkResponse bulkResponse = client.bulk(bulkRequest,RequestOptions.DEFAULT);
+
                 logger.info("committing the offset...");
                 kafkaConsumer.commitSync();
                 logger.info("offset have been committed");
@@ -142,7 +144,7 @@ public class ElasicSeachConsumer {
                 }
             }
         }
-        logger.info("Existing the application...");
+        logger.info("Existing the application... " + numberOfMessagesReadSoFar + " messages have been read");
     }
 
     private static String getTweetId(String jsonString) {
