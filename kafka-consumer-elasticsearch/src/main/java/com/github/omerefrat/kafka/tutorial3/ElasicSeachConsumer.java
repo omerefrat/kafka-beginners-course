@@ -20,6 +20,7 @@ import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import twitter4j.JSONObject;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
@@ -64,6 +65,8 @@ public class ElasicSeachConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG,groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"earliest");
+        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"10");
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,"false"); // disable auto commit of offsets
 
         // create the Consumer
         KafkaConsumer<String,String> consumer = new KafkaConsumer<String, String>(properties);
@@ -95,19 +98,31 @@ public class ElasicSeachConsumer {
             logger.info(records.count() + " new tweets received");
             for (ConsumerRecord<String,String> record :records){
                 numberOfMessagesReadSoFar++;
+                String jsonString = record.value();
 
-                if (!record.value().isEmpty()){
-                    String jsonString = record.value();
+                if (!jsonString.isEmpty()){
+
+                    // kafka generic id
+                    //String id = record.topic() + "_" + record.partition()  + "_" +  record.offset();
+
+                    // twitter id
+                    String id = getTweetId(jsonString);
 
                     logger.info("start saving tweet text: " + jsonString);
                     IndexRequest indexRequest = new IndexRequest(
                             "twitter",
-                            "tweets")
+                            "tweets",
+                            id)
                             .source(jsonString, XContentType.JSON);
 
                     IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
-                    String id = indexResponse.getId();
-                    logger.info(id);
+                    logger.info(indexResponse.getId());
+
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 if (numberOfMessagesReadSoFar == numberOfMessagesToRead){
@@ -115,7 +130,32 @@ public class ElasicSeachConsumer {
                     break;
                 }
             }
+
+            if (records.count() > 0) {
+                logger.info("committing the offset...");
+                kafkaConsumer.commitSync();
+                logger.info("offset have been committed");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
         }
-        logger.info("Existing the application");
+        logger.info("Existing the application...");
+    }
+
+    private static String getTweetId(String jsonString) {
+
+        String id = "";
+
+        try{
+            JSONObject json = new JSONObject(jsonString);
+            id = json.getString("id_str");
+        } catch (Exception e){
+            logger.error("Error extracting tweet id (id_str) from json",e);
+        }
+
+        return  id;
     }
 }

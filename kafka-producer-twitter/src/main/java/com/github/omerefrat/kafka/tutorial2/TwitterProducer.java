@@ -83,6 +83,7 @@ public class TwitterProducer {
             shortMsg.append("text", json.getString("text"));
             shortMsg.append("created_at", json.getString("created_at"));
             shortMsg.append("retweeted", json.getString("retweeted"));
+            shortMsg.append("id_str", json.getString("id_str"));
 
             JSONObject userJson = json.getJSONObject("user");
             shortMsg.append("screen_name",userJson.getString("screen_name"));
